@@ -48,22 +48,10 @@ struct MenuView: View {
                             let open = model.showSystem || !model.filter.isEmpty
                             // Not a DisclosureGroup: on macOS it adds its own indent and
                             // sizing, and the menu jumped wider when it opened.
-                            Button { model.showSystem.toggle() } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption2.weight(.bold))
-                                        .rotationEffect(.degrees(open ? 90 : 0))
-                                    Text("System (\(system.count))")
-                                        .font(.caption.weight(.semibold))
-                                    Spacer()
-                                }
-                                .foregroundStyle(.secondary)
-                                .contentShape(Rectangle())
+                            SectionRow(title: "System", count: system.count, open: open) {
+                                model.showSystem.toggle()
                             }
-                            .buttonStyle(.plain)
-                            .padding(.horizontal, 10)
-                            .padding(.top, 8)
-                            .padding(.bottom, 2)
+                            .padding(.top, 6)
                             if open {
                                 ForEach(system) { server in
                                     ServerRow(model: model, server: server)
@@ -119,14 +107,17 @@ struct MenuView: View {
         .padding(.bottom, 4)
     }
 
+    /// One type scale with the rows: callout (12 pt) throughout, secondary ink, borderless
+    /// controls; the leading edge lines up with the rows' chevrons.
     @ViewBuilder private var footer: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             let orphans = model.orphans
             if confirmReap {
                 Text("Kill \(orphans.count) orphaned \(orphans.count == 1 ? "server" : "servers")?")
-                    .font(.callout)
                 Spacer()
                 Button("Cancel") { confirmReap = false }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
                 Button("Kill", role: .destructive) {
                     model.kill(orphans)
                     confirmReap = false
@@ -135,20 +126,26 @@ struct MenuView: View {
                 .tint(.red)
             } else {
                 if !orphans.isEmpty {
-                    Button("Reap orphans (\(orphans.count))") { confirmReap = true }
+                    Button("Reap \(orphans.count) \(orphans.count == 1 ? "orphan" : "orphans")") { confirmReap = true }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.orange)
                         .help(orphans.map(\.name).joined(separator: "\n"))
                 }
                 Spacer()
-                Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin },
-                                                        set: { model.launchAtLogin = $0 }))
-                    .toggleStyle(.checkbox)
-                    .font(.caption)
+                Toggle(isOn: Binding(get: { model.launchAtLogin }, set: { model.launchAtLogin = $0 })) {
+                    Text("Launch at login").foregroundStyle(.secondary)
+                }
+                .toggleStyle(.checkbox)
                 Button("Quit") { NSApp.terminate(nil) }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
             }
         }
+        .font(.callout)
         .controlSize(.small)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.leading, 18)
+        .padding(.trailing, 18)
+        .padding(.vertical, 11)
     }
 }
 
@@ -181,6 +178,8 @@ private struct ScrollIf<Content: View>: View {
     }
 }
 
+/// Group and section headers share the rows' columns: text starts where row names
+/// start (after the 12 pt chevron slot), in callout and secondary ink.
 private struct ProjectHeader: View {
     let name: String
     let count: Int
@@ -188,20 +187,56 @@ private struct ProjectHeader: View {
     @State private var hovering = false
 
     var body: some View {
-        HStack {
-            Text(name).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            Color.clear.frame(width: 12, height: 1)
+            Text(name).font(.callout.weight(.medium)).foregroundStyle(.secondary)
             Spacer()
-            if hovering {
-                Button("Kill all \(count)", action: kill)
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            Button("Kill all \(count)", action: kill)
+                .buttonStyle(.borderless)
+                .font(.callout)
+                .foregroundStyle(.red)
+                .opacity(hovering ? 1 : 0)
+                .allowsHitTesting(hovering)
         }
         .frame(height: 18)
-        .padding(.horizontal, 10)
-        .padding(.top, 6)
+        .padding(.horizontal, 8)
+        .padding(.top, 7)
+        .padding(.trailing, 44)
         .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+    }
+}
+
+/// A collapsible section that reads as a row: chevron in the rows' chevron column,
+/// title in the name column.
+private struct SectionRow: View {
+    let title: String
+    let count: Int
+    let open: Bool
+    let toggle: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 12)
+                // The count sits beside the title: in the port column it read as a port.
+                HStack(spacing: 6) {
+                    Text(title).foregroundStyle(.secondary)
+                    Text(verbatim: String(count)).foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 7).fill(hovering ? Color.primary.opacity(0.08) : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
         .onHover { hovering = $0 }
     }
 }
