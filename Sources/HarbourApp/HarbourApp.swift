@@ -44,6 +44,8 @@ final class HarbourModel {
     private(set) var killing: Set<String> = []
     private(set) var tmux: [String: String] = [:]
     var expanded: String?
+    var filter = ""
+    private(set) var history = MemoryHistory()
     var showSystem = Preview.environment["HARBOUR_SYSTEM"] != nil
 
     var isOpen = false {
@@ -52,10 +54,17 @@ final class HarbourModel {
 
     private let scanner = Scanner()
     private var loop: Task<Void, Never>?
+    private let hotkey = GlobalHotkey()
 
     init() {
         restartLoop()
+        applyHotkey()
         Preview.openMenuIfRequested(self)
+    }
+
+    private func applyHotkey() {
+        let setting = config.hotkey ?? Hotkey.default
+        hotkey.register(setting == "off" ? nil : Hotkey(setting)) { StatusItem.toggle() }
     }
 
     /// 2 s while the menu is open, 30 s otherwise; opening it refreshes immediately.
@@ -72,8 +81,14 @@ final class HarbourModel {
 
     func refresh() async {
         let latest = Config.load()
-        if latest != config { config = latest }
-        snapshot = await scanner.scan(config: config)
+        if latest != config {
+            let hotkeyChanged = latest.hotkey != config.hotkey
+            config = latest
+            if hotkeyChanged { applyHotkey() }
+        }
+        let fresh = await scanner.scan(config: config)
+        snapshot = fresh
+        history.record(fresh)
         Preview.afterRefresh(self)
     }
 
@@ -99,6 +114,49 @@ final class HarbourModel {
     func open(_ server: Server) {
         guard let url = server.url else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    /// Clearing on close means the hotkey always opens to the whole list.
+    func menuClosed() {
+        isOpen = false
+        filter = ""
+    }
+
+    var filtered: (projects: [(project: String, servers: [Server])], system: [Server]) {
+        guard let snapshot else { return ([], []) }
+        let groups = snapshot.projectGroups.compactMap { group -> (project: String, servers: [Server])? in
+            let servers = group.servers.filter { $0.matches(filter) }
+            return servers.isEmpty ? nil : (group.project, servers)
+        }
+        return (groups, snapshot.system.filter { $0.matches(filter) })
+    }
+
+    /// Return in the filter field opens the first match that serves HTTP.
+    func openFirstMatch() {
+        let (projects, system) = filtered
+        if let server = (projects.flatMap(\.servers) + system).first(where: \.isHTTP) { open(server) }
+    }
+
+    func openEditor(_ server: Server) {
+        Launch.editor(server.cwd ?? server.project, config: config)
+    }
+
+    func openTerminal(_ server: Server) {
+        Launch.terminal(server.cwd ?? server.project, config: config)
+    }
+
+    var editorName: String? { Tools.editor(config) }
+
+    /// "⌃⌥P" for the filter field's hint; nil when the hotkey is off or unparseable.
+    var hotkeyLabel: String? {
+        let setting = config.hotkey ?? Hotkey.default
+        guard setting != "off", let key = Hotkey(setting), let letter = setting.split(separator: "+").last else { return nil }
+        var label = ""
+        if key.modifiers.contains(.control) { label += "⌃" }
+        if key.modifiers.contains(.option) { label += "⌥" }
+        if key.modifiers.contains(.shift) { label += "⇧" }
+        if key.modifiers.contains(.command) { label += "⌘" }
+        return label + letter.trimmingCharacters(in: .whitespaces).uppercased()
     }
 
     func kill(_ servers: [Server]) {

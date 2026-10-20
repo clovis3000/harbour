@@ -1,4 +1,5 @@
 import AppKit
+import Charts
 import HarbourCore
 import SwiftUI
 
@@ -7,18 +8,23 @@ struct MenuView: View {
     var scrolls = true
     @State private var confirmReap = false
 
+    @FocusState private var filterFocused: Bool
+
     var body: some View {
         VStack(spacing: 0) {
+            filterField
             ScrollIf(scrolls) {
                 VStack(alignment: .leading, spacing: 2) {
-                    if let snapshot = model.snapshot {
-                        if snapshot.projects.isEmpty && model.stoppedPins.isEmpty {
-                            Text("Nothing running")
+                    if model.snapshot != nil {
+                        let (groups, system) = model.filtered
+                        let pins = model.stoppedPins.filter { model.filter.isEmpty || $0.name.localizedCaseInsensitiveContains(model.filter) }
+                        if groups.isEmpty && pins.isEmpty && (model.filter.isEmpty || system.isEmpty) {
+                            Text(model.filter.isEmpty ? "Nothing running" : "No matches")
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 24)
                         }
-                        ForEach(snapshot.projectGroups, id: \.project) { group in
+                        ForEach(groups, id: \.project) { group in
                             if group.servers.count > 1 {
                                 VStack(alignment: .leading, spacing: 2) {
                                     ProjectHeader(name: (group.project as NSString).lastPathComponent,
@@ -34,18 +40,20 @@ struct MenuView: View {
                                 ServerRow(model: model, server: group.servers[0])
                             }
                         }
-                        ForEach(model.stoppedPins) { pin in
+                        ForEach(pins) { pin in
                             StoppedPinRow(pin: pin) { model.unpin(pin) }
                         }
-                        if !snapshot.system.isEmpty {
+                        if !system.isEmpty {
+                            // While filtering, System matches show without a click.
+                            let open = model.showSystem || !model.filter.isEmpty
                             // Not a DisclosureGroup: on macOS it adds its own indent and
                             // sizing, and the menu jumped wider when it opened.
                             Button { model.showSystem.toggle() } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: "chevron.right")
                                         .font(.caption2.weight(.bold))
-                                        .rotationEffect(.degrees(model.showSystem ? 90 : 0))
-                                    Text("System (\(snapshot.system.count))")
+                                        .rotationEffect(.degrees(open ? 90 : 0))
+                                    Text("System (\(system.count))")
                                         .font(.caption.weight(.semibold))
                                     Spacer()
                                 }
@@ -56,8 +64,8 @@ struct MenuView: View {
                             .padding(.horizontal, 10)
                             .padding(.top, 8)
                             .padding(.bottom, 2)
-                            if model.showSystem {
-                                ForEach(snapshot.system) { server in
+                            if open {
+                                ForEach(system) { server in
                                     ServerRow(model: model, server: server)
                                 }
                             }
@@ -74,13 +82,41 @@ struct MenuView: View {
             footer
         }
         .frame(width: 400)
+        // Both appearance and key status: on first open the window becomes key before
+        // this view subscribes, so the notification alone misses it.
+        .onAppear { opened() }
+        .onDisappear { model.menuClosed() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-            model.isOpen = true
+            opened()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
-            model.isOpen = false
+            model.menuClosed()
             confirmReap = false
         }
+    }
+
+    private func opened() {
+        model.isOpen = true
+        Task { filterFocused = true }
+    }
+
+    private var filterField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Filter by name, folder or port", text: $model.filter)
+                .textFieldStyle(.plain)
+                .focused($filterFocused)
+                .onSubmit { model.openFirstMatch() }
+                .onExitCommand {
+                    if model.filter.isEmpty { StatusItem.toggle() } else { model.filter = "" }
+                }
+            if let shortcut = model.hotkeyLabel {
+                Text(shortcut).font(.caption).foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 12)
+        .padding(.bottom, 4)
     }
 
     @ViewBuilder private var footer: some View {
@@ -306,6 +342,23 @@ private struct ServerDetail: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 }
+                GridRow {
+                    label("Memory")
+                    MemorySparkline(samples: model.history[server])
+                }
+                GridRow {
+                    label("Open")
+                    HStack(spacing: 10) {
+                        if let editor = model.editorName {
+                            Button("\(editor)") { model.openEditor(server) }
+                                .help("Open the folder in \(editor)")
+                        }
+                        Button("Terminal") { model.openTerminal(server) }
+                            .help("Open a terminal in the folder")
+                    }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                }
                 row("Bound", server.sockets.map { "\($0.family == .v6 ? "[\($0.address)]" : $0.address):\($0.port)" }
                     .joined(separator: "  "), mono: true)
                 if let tmux = model.tmux[server.id] {
@@ -397,5 +450,68 @@ private struct StoppedPinRow: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
+    }
+}
+
+/// Footprint since Harbour started watching this server: one series, a 2 px line, no
+/// axes. The caption carries the numbers; hovering reads off a single sample.
+private struct MemorySparkline: View {
+    let samples: [MemoryHistory.Sample]
+    @State private var hovered: MemoryHistory.Sample?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if samples.count >= 2 {
+                Chart {
+                    ForEach(samples) { sample in
+                        LineMark(x: .value("Time", sample.date), y: .value("Footprint", Double(sample.bytes)))
+                            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    }
+                    if let hovered {
+                        RuleMark(x: .value("Time", hovered.date))
+                            .lineStyle(StrokeStyle(lineWidth: 1))
+                            .foregroundStyle(Color.secondary.opacity(0.5))
+                        PointMark(x: .value("Time", hovered.date), y: .value("Footprint", Double(hovered.bytes)))
+                            .symbolSize(30)
+                    }
+                }
+                .chartXAxis(.hidden)
+                .chartYAxis(.hidden)
+                .chartYScale(domain: domain)
+                .chartLegend(.hidden)
+                .frame(height: 32)
+                .chartOverlay { proxy in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            guard case .active(let point) = phase, let date: Date = proxy.value(atX: point.x) else {
+                                hovered = nil
+                                return
+                            }
+                            hovered = samples.min { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }
+                        }
+                }
+            }
+            Text(caption).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
+    }
+
+    /// At least 25% of the peak tall, centred on the data: a leak shows as a climb, but
+    /// a few KB of churn on a 13 MB server stays flat instead of filling the chart.
+    private var domain: ClosedRange<Double> {
+        let values = samples.map { Double($0.bytes) }
+        let low = values.min() ?? 0, high = values.max() ?? 1
+        let span = max(high - low, high * 0.25, 1)
+        let mid = (low + high) / 2
+        return max(0, mid - span / 2)...(mid + span / 2)
+    }
+
+    private var caption: String {
+        if let hovered {
+            return "\(Format.bytes(hovered.bytes)) at \(hovered.date.formatted(date: .omitted, time: .shortened))"
+        }
+        guard let last = samples.last else { return "—" }
+        guard samples.count >= 2, let first = samples.first else { return "\(Format.bytes(last.bytes)) · history builds every 10 s" }
+        let peak = samples.map(\.bytes).max() ?? last.bytes
+        return "\(Format.bytes(last.bytes)) now · peak \(Format.bytes(peak)) · over \(Format.uptime(since: first.date, now: last.date))"
     }
 }

@@ -7,6 +7,12 @@ public struct Config: Codable, Sendable, Equatable {
     /// "<project path>:<port>" → display name.
     public var names: [String: String] = [:]
     public var pins: [Pin] = []
+    /// A command run in the terminal (`nvim`) or an app name (`Zed`). Auto-detected when unset.
+    public var editor: String?
+    /// An app name (`Ghostty`, `Terminal`). Auto-detected when unset.
+    public var terminal: String?
+    /// Opens the menu from anywhere, e.g. "ctrl+option+p". `"off"` disables it.
+    public var hotkey: String?
 
     public init() {}
 
@@ -15,6 +21,9 @@ public struct Config: Codable, Sendable, Equatable {
         roots = try c.decodeIfPresent([String].self, forKey: .roots) ?? Config().roots
         names = try c.decodeIfPresent([String: String].self, forKey: .names) ?? [:]
         pins = try c.decodeIfPresent([Pin].self, forKey: .pins) ?? []
+        editor = try c.decodeIfPresent(String.self, forKey: .editor)
+        terminal = try c.decodeIfPresent(String.self, forKey: .terminal)
+        hotkey = try c.decodeIfPresent(String.self, forKey: .hotkey)
     }
 
     public static let url = URL(fileURLWithPath: Format.expand("~/.config/harbour/config.json"))

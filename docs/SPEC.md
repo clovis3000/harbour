@@ -120,6 +120,7 @@ All stored state lives in one file, `~/.config/harbour/config.json`, readable by
 {
   "roots": ["~/code", "~/research"],
   "names": { "~/code/myapp:5193": "Myapp mockups" },
+  "editor": "nvim", "terminal": "Ghostty", "hotkey": "ctrl+option+p",
   "pins":  [{ "project": "~/code/myapp", "cwd": "~/code/myapp/web", "port": 5173, "command": "node node_modules/vite/bin/vite.js --port 5173" }]
 }
 ```
@@ -129,9 +130,21 @@ All stored state lives in one file, `~/.config/harbour/config.json`, readable by
 - Swift 6.3, SwiftUI with `@Observable`, macOS 26 deployment target. The app isn't sandboxed, because it has to inspect and signal other processes.
 - A Swift package with three targets: `HarbourCore` (library), `harbour` (CLI) and `HarbourApp` (menu bar app). A script bundles `HarbourApp` into `Harbour.app` (with `LSUIElement`, ad-hoc signed) in `~/Applications`, and links the CLI into `~/.local/bin`.
 
-## Not in v1
+## v2 additions (2026-10-20)
+
+These are the low-risk features. None of them changes what a server is or what kill reaches.
+
+- **Global hotkey.** The default is `ctrl+option+p`; set `"hotkey"` in the config to change it, or `"off"` to disable it. It's registered through Carbon's `RegisterEventHotKey`, which needs no Accessibility permission. *Rationale:* an event tap would need that permission, and a tool this small shouldn't ask for it. Chords without a modifier are refused, because they would swallow ordinary typing system-wide.
+- **Type-to-filter.** A field at the top of the menu has focus whenever the menu opens. It matches name, project, folder or port prefix. Return opens the first HTTP match. Esc clears the field, or closes the menu if it's already empty. While filtering, System matches show without a click. The filter clears when the menu closes, so the hotkey always opens to the full list.
+- **Memory history.** The detail view shows a sparkline of the tree's footprint, with one sample at least every 10 s, for up to 2 h. It's kept in memory only: it starts when Harbour launches and resets when the server restarts. *Rationale:* persisting it would be stored state that nothing keeps true. The vertical range spans at least 25% of the peak. *Rationale:* an auto-scaled axis drew a few KB of churn on a 13 MB server as a mountain.
+- **Open in editor or terminal** from the detail view. `"editor"` is either a command run in the terminal (`nvim`) or an app name (`Zed`). `"terminal"` is an app name. When they're unset, the editor is the first of nvim, Zed, Cursor or VS Code that's installed, and the terminal is Ghostty if installed, else Terminal. Terminal.app can only open a folder; running a command in it would need AppleScript.
+
+## Not yet
 
 - **Starting or restarting pinned servers.** Pins record the command so this can be added later, but v1 only observes and kills.
-- **`*.localhost` names behind a local proxy.** Using the port as identity is the remaining bandaid: pinned tabs bookmark an implementation detail. Names would make ports invisible and collisions irrelevant. Derived ports deliver most of that value until then.
 - **Remote hosts** (a home server or a VPS). The server model carries a `host` field so a Tailscale + `ss` source can be added later without reshaping anything.
 - **Auto-reaping.** Harbour flags orphans and only reaps them when asked.
+
+## Rejected
+
+- **`*.localhost` names behind a local proxy** (rejected 2026-10-20). It would make every bookmark depend on Harbour staying up, when today a server works whether or not Harbour is running. Moving apps to new origins would also lose their local storage and sign-in cookies, make frontend-to-backend calls cross-origin, and need Vite's live reload proxied correctly. Derived ports plus page-title names already cover the identity problem.

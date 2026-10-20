@@ -14,6 +14,9 @@ Local web apps have become desktop apps without any of the infrastructure deskto
   - 📶 **exposed:** bound to all interfaces, so reachable from your network. (`python -m http.server` does this unless you pass `--bind 127.0.0.1`.)
 - **Detail:** the command line, folder, bind addresses, the process tree with a kill button per process, and the tmux pane the server is running in, with a "jump to pane" button.
 - **Pins** keep a server's row in the list, greyed out, after it stops.
+- **Hotkey and filter:** <kbd>⌃⌥P</kbd> opens the menu from anywhere, with the cursor in a filter field. Type a name, folder or port, then press Return to open the first match. Esc clears the field.
+- **Memory history:** a sparkline in the detail view of the process tree's footprint over the last two hours, for spotting a dev server that leaks.
+- **Open the folder** in your editor (`nvim` runs in your terminal; Zed, Cursor or VS Code open as apps) or in a new terminal window.
 
 Everything is read live through `libproc`. Harbour never shells out to `lsof` and keeps no registry that could go stale. The only stored state is your pins and name overrides, in `~/.config/harbour/config.json`.
 
@@ -37,7 +40,20 @@ Requires macOS 26 and Swift 6.2 or later (Xcode 26).
 
 The script builds a release, installs `Harbour.app` to `~/Applications` and the CLI to `~/.local/bin/harbour`, then launches the app. If `just` is installed, `just install`, `just dev` and `just test` work too.
 
-By default, servers whose working directory is under `~/code` or `~/research` count as projects, and everything else goes in a collapsed System section. To change that, edit `roots` in the config file.
+Settings live in `~/.config/harbour/config.json`, and every key is optional:
+
+```json
+{
+  "roots": ["~/code", "~/research"],
+  "hotkey": "ctrl+option+p",
+  "editor": "nvim",
+  "terminal": "Ghostty"
+}
+```
+
+- **`roots`:** servers whose working directory is under one of these count as projects. Everything else goes in a collapsed System section.
+- **`hotkey`:** use `"off"` to disable it.
+- **`editor` and `terminal`:** auto-detected when unset.
 
 ## Design
 
