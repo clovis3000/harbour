@@ -65,11 +65,31 @@ import Testing
     #expect(server.matches("  "))
 }
 
+@Test func argvBecomesAShellLine() {
+    #expect(Shell.line(["/bin/bash", "./dev.sh"]) == "/bin/bash ./dev.sh")
+    #expect(Shell.line(["python3", "-m", "http.server", "--directory", "my site"]) == "python3 -m http.server --directory 'my site'")
+    #expect(Shell.line(["sh", "-c", "echo 'hi'"]) == #"sh -c 'echo '\''hi'\'''"#)
+    #expect(Shell.line(["npm run dev   ", "", ""]) == "npm run dev")   // node rewrote its title over argv
+}
+
+@Test func pinRecordsTheTreeRoot() {
+    let base = Server.fixture(id: "1@1", footprint: 0, port: 5174, cwd: "/tmp/animise/web")
+    let server = Server(id: base.id, host: "local", name: "Animise", root: 445, listeners: [772, 803],
+                        sockets: base.sockets, cwd: "/tmp/animise", project: "/tmp/animise",
+                        command: ["target/debug/animise-server"], rootCommand: ["/bin/bash", "./dev.sh"],
+                        rootCwd: "/tmp/animise", start: .now, tree: [], ancestors: [], footprint: 0,
+                        badges: [], section: .projects, primaryPort: 5174, httpPorts: [5174])
+    let pin = Pin(server)
+    #expect(pin.command == "/bin/bash ./dev.sh")
+    #expect(pin.cwd == "/tmp/animise")
+}
+
 extension Server {
     static func fixture(id: String, footprint: UInt64, name: String = "x", port: Int = 3000, cwd: String = "/tmp/x") -> Server {
         Server(id: id, host: "local", name: name, root: 1, listeners: [1],
                sockets: [Socket(port: port, family: .v4, address: "127.0.0.1")], cwd: cwd,
-               project: (cwd as NSString).deletingLastPathComponent, command: [], start: .now, tree: [],
+               project: (cwd as NSString).deletingLastPathComponent, command: [], rootCommand: [], rootCwd: cwd,
+               start: .now, tree: [],
                ancestors: [], footprint: footprint, badges: [], section: .projects,
                primaryPort: port, httpPorts: [port])
     }

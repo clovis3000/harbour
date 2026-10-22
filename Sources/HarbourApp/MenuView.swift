@@ -17,7 +17,7 @@ struct MenuView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     if model.snapshot != nil {
                         let (groups, system) = model.filtered
-                        let pins = model.stoppedPins.filter { model.filter.isEmpty || $0.name.localizedCaseInsensitiveContains(model.filter) }
+                        let pins = model.filteredPins
                         if groups.isEmpty && pins.isEmpty && (model.filter.isEmpty || system.isEmpty) {
                             Text(model.filter.isEmpty ? "Nothing running" : "No matches")
                                 .foregroundStyle(.secondary)
@@ -41,7 +41,7 @@ struct MenuView: View {
                             }
                         }
                         ForEach(pins) { pin in
-                            StoppedPinRow(pin: pin) { model.unpin(pin) }
+                            StoppedPinRow(model: model, pin: pin)
                         }
                         if !system.isEmpty {
                             // While filtering, System matches show without a click.
@@ -461,30 +461,62 @@ private struct ServerDetail: View {
     }
 }
 
+/// A pin whose server isn't running. Clicking it starts the recorded command in tmux
+/// and opens the page once it answers, like launching an app from the Dock.
 private struct StoppedPinRow: View {
+    let model: HarbourModel
     let pin: Pin
-    let unpin: () -> Void
+    @State private var hovering = false
+
+    private var starting: Bool { model.starting[pin.id] != nil }
+    private var failed: Bool { model.failed.contains(pin.id) }
 
     var body: some View {
         HStack(spacing: 8) {
             Color.clear.frame(width: 12, height: 1)
             VStack(alignment: .leading, spacing: 1) {
                 Text(pin.name).lineLimit(1)
-                Text(pin.folderExists ? "stopped · \(pin.cwd)" : "folder missing · \(pin.cwd)")
+                if failed {
+                    HStack(spacing: 4) {
+                        Text("didn't start ·").lineLimit(1)
+                        Button("show pane") { model.showPane(pin) }
+                            .buttonStyle(.link)
+                    }
                     .font(.caption)
-                    .lineLimit(1)
+                } else {
+                    Text(caption).font(.caption).lineLimit(1)
+                }
             }
             Spacer()
             Text(String(pin.port)).font(.callout.monospacedDigit())
-            Button(action: unpin) { Image(systemName: "pin.fill") }
+            Button { model.unpin(pin) } label: { Image(systemName: "pin.fill") }
                 .buttonStyle(.borderless)
                 .help("Unpin")
                 .frame(width: 18)
-            Color.clear.frame(width: 18, height: 1)
+            // Start sits in the slot a running row's kill button uses.
+            if starting {
+                ProgressView().controlSize(.small).frame(width: 18)
+            } else if hovering && pin.folderExists {
+                Button { model.start(pin) } label: { Image(systemName: "play.fill") }
+                    .buttonStyle(.borderless)
+                    .help("Start: \(pin.command)")
+                    .frame(width: 18)
+            } else {
+                Color.clear.frame(width: 18, height: 1)
+            }
         }
         .foregroundStyle(.secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 7).fill(hovering && pin.folderExists ? Color.primary.opacity(0.08) : .clear))
+        .contentShape(Rectangle())
+        .onTapGesture { if pin.folderExists { model.start(pin) } }
+        .onHover { hovering = $0 }
+    }
+
+    private var caption: String {
+        if !pin.folderExists { return "folder missing · \(pin.cwd)" }
+        return starting ? "starting · \(pin.cwd)" : "stopped · \(pin.cwd)"
     }
 }
 

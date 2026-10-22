@@ -106,7 +106,60 @@ public enum Ports {
     }
 }
 
+public enum Shell {
+    /// argv as a line a shell will split back into the same argv. Node tools (npm, vite)
+    /// rewrite their title over argv, so the OS reports `["npm run dev", "", ""]`: one
+    /// spaced word and blanks is already a command line, and quoting it breaks it.
+    public static func line(_ argv: [String]) -> String {
+        let args = argv.filter { !$0.isEmpty }
+        if args.count == 1, args[0].contains(where: \.isWhitespace) {
+            return args[0].trimmingCharacters(in: .whitespaces)
+        }
+        return args.map(quote).joined(separator: " ")
+    }
+
+    public static func quote(_ arg: String) -> String {
+        let safe = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "@%+=:,./_-"))
+        if !arg.isEmpty, arg.unicodeScalars.allSatisfy(safe.contains) { return arg }
+        return "'" + arg.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+    }
+}
+
 public enum Tmux {
+    static let session = "harbour"
+
+    /// Types a pin's command into its own window of a detached `harbour` session. The
+    /// window's login shell gives it the PATH and nvm a terminal would (an app launched
+    /// from the menu bar has neither), and it outlives the server, so a crash leaves its
+    /// output in the pane for Jump to pane. Reuses the pin's window, respawned so a hung
+    /// earlier attempt can't swallow the keys.
+    public static func start(_ pin: Pin) -> Bool {
+        let cwd = Format.expand(pin.cwd)
+        let target: String
+        if let existing = window(named: pin.name) {
+            guard run(["respawn-window", "-k", "-t", existing, "-c", cwd]) != nil else { return false }
+            target = existing
+        } else {
+            let create = run(["has-session", "-t", "=" + session]) != nil
+                ? ["new-window", "-d", "-t", "=\(session):"]
+                : ["new-session", "-d", "-s", session]
+            guard let id = run(create + ["-P", "-F", "#{window_id}", "-n", pin.name, "-c", cwd]) else { return false }
+            target = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        // -l so no word of the command is read as a key name.
+        return run(["send-keys", "-l", "-t", target, pin.command]) != nil
+            && run(["send-keys", "-t", target, "Enter"]) != nil
+    }
+
+    /// `harbour:@7` for the pin's window, for Jump to pane when a start didn't come up.
+    public static func window(named name: String) -> String? {
+        guard let output = run(["list-windows", "-t", "=" + session, "-F", "#{window_id} #{window_name}"]) else { return nil }
+        return output.split(separator: "\n").lazy.compactMap { line -> String? in
+            let parts = line.split(separator: " ", maxSplits: 1)
+            return parts.count == 2 && parts[1] == name ? "\(session):\(parts[0])" : nil
+        }.first
+    }
+
     /// `session:window.pane` of the tmux pane whose shell is an ancestor of the server.
     /// Shells out, so call it when a detail opens, not on every refresh.
     public static func location(of server: Server) -> String? {

@@ -95,7 +95,7 @@ The menu is a `MenuBarExtra` in window style.
 - **Row:** name, port(s), memory and badges. Pin and kill sit in fixed-width slots so that hovering never shifts the layout. Clicking the row opens `http://localhost:<port>` (HTTP servers only). On hover, the row shows a kill button and a pin toggle.
 - **Project header:** shown only when a project has more than one server. It has its own "kill all".
 - **Detail**, expanded inline from the row: uptime, full command line, working directory, the process tree with per-pid memory and a kill button on each node, bind addresses, and the tmux location (`session:window.pane`) when an ancestor is a tmux pane's shell. **Jump to pane** switches an attached tmux client to that pane, or opens Ghostty with `tmux attach -t <target>` if no client is attached.
-- **Pinned but not running:** the row stays in place, greyed out with "stopped", and keeps its working directory. If that folder no longer exists, the row says so. Version 1 has no Start button.
+- **Pinned but not running:** the row stays in place, greyed out with "stopped", and keeps its working directory. If that folder no longer exists, the row says so. Since v3, clicking it starts the server (see below).
 - **Footer:** "Reap orphans (n)", which kills every orphaned Projects tree after a confirmation listing them. Also the System disclosure, Launch at login, and Quit.
 
 ## CLI
@@ -139,9 +139,19 @@ These are the low-risk features. None of them changes what a server is or what k
 - **Memory history.** The detail view shows a sparkline of the tree's footprint, with one sample at least every 10 s, for up to 2 h. It's kept in memory only: it starts when Harbour launches and resets when the server restarts. *Rationale:* persisting it would be stored state that nothing keeps true. The vertical range spans at least 25% of the peak. *Rationale:* an auto-scaled axis drew a few KB of churn on a 13 MB server as a mountain.
 - **Open in editor or terminal** from the detail view. `"editor"` is either a command run in the terminal (`nvim`) or an app name (`Zed`). `"terminal"` is an app name. When they're unset, the editor is the first of nvim, Zed, Cursor or VS Code that's installed, and the terminal is Ghostty if installed, else Terminal. Terminal.app can only open a folder; running a command in it would need AppleScript.
 
+## v3: starting pinned servers (2026-10-22)
+
+Pins act as a launch pad: once a server has run and been pinned, you can start it again from the menu without opening its folder in a terminal.
+
+- **A pin records the tree root's command and folder**, not the listener's. For a `dev.sh` that starts a Rust API and vite, the listener is `target/debug/animise-server`. Re-running that would start a stale debug build with no frontend; `./dev.sh` brings back the whole tree. *Rationale:* the tree root is already where Harbour draws a project's edge for kill, so it's also the thing that starts the project.
+- **The command is stored as a shell line**, quoted from argv so it splits back into the same argv. Node tools rewrite their process title over argv, which the OS then reports as `["npm run dev", "", ""]`; a single spaced word followed by blanks is taken as an existing command line and kept unquoted. Because it's a plain line, the user can edit it in the config.
+- **Start types the command into a window of a detached tmux session called `harbour`**, one window per pin, named after the pin. A second Start reuses that window and respawns it first, so a hung earlier attempt can't swallow the keystrokes. *Rationale:* the window's login shell gives the server the PATH and nvm setup a terminal has, which an app launched from the menu bar doesn't. The server outlives Harbour quitting, its output stays in the pane, and the existing Jump to pane works on it unchanged. A process Harbour spawned directly would die with it and log nowhere.
+- **Clicking a stopped row, or the play button in the kill slot, starts it.** Return in the filter field starts the first matching stopped pin when nothing running matches. While a pin is starting, the menu refreshes every 2 s even when it's closed. When the pin's port appears and answers HTTP (or 10 s after it appears, if it never does), the page opens in the browser. After 180 s with no port, long enough for a cold `cargo run`, the row says "didn't start" and offers "show pane".
+
 ## Not yet
 
-- **Starting or restarting pinned servers.** Pins record the command so this can be added later, but v1 only observes and kills.
+- **`harbour run -- <cmd>`**, which would take the derived port, start the command in the `harbour` tmux session and pin it in one step, so servers that agents start register themselves.
+- **Start at login** for a pin, through a LaunchAgent that macOS keeps, for apps that are always open.
 - **Remote hosts** (a home server or a VPS). The server model carries a `host` field so a Tailscale + `ss` source can be added later without reshaping anything.
 - **Auto-reaping.** Harbour flags orphans and only reaps them when asked.
 

@@ -59,6 +59,7 @@ public actor Scanner {
             drafts.append(Draft(
                 root: rootInfo, listeners: listeners, sockets: socks, cwd: cwd, project: project,
                 command: arguments(table[listeners[0]] ?? rootInfo),
+                rootCommand: arguments(rootInfo), rootCwd: Proc.cwd(root),
                 tree: nodes, ancestors: ancestors(of: root, table: table),
                 section: inRoots ? .projects : .system,
                 orphan: rootInfo.ppid == 1 && !isLaunchdJob(rootInfo)))
@@ -245,6 +246,8 @@ public actor Scanner {
         let cwd: String?
         let project: String
         let command: [String]
+        let rootCommand: [String]
+        let rootCwd: String?
         let tree: [ProcessNode]
         let ancestors: [Int32]
         let section: Section
@@ -274,7 +277,7 @@ public actor Scanner {
         return Server(
             id: "\(d.root.pid)@\(Int(d.root.start.timeIntervalSince1970))", host: "local", name: name,
             root: d.root.pid, listeners: d.listeners, sockets: d.sockets, cwd: d.cwd, project: d.project,
-            command: d.command, start: d.root.start, tree: d.tree, ancestors: d.ancestors,
+            command: d.command, rootCommand: d.rootCommand, rootCwd: d.rootCwd, start: d.root.start, tree: d.tree, ancestors: d.ancestors,
             footprint: d.tree.reduce(0) { $0 + $1.footprint }, badges: badges, section: d.section,
             primaryPort: primary, httpPorts: httpPorts)
     }

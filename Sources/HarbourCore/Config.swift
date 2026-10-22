@@ -63,6 +63,7 @@ public struct Pin: Codable, Sendable, Hashable, Identifiable {
     public var project: String
     public var cwd: String
     public var port: Int
+    /// A shell line typed into the pin's tmux window by Start. Editable: `just dev` works.
     public var command: String
 
     public var id: String { "\(project):\(port)" }
@@ -70,9 +71,9 @@ public struct Pin: Codable, Sendable, Hashable, Identifiable {
     init(_ server: Server) {
         name = server.name
         project = Format.abbreviate(server.project)
-        cwd = Format.abbreviate(server.cwd ?? server.project)
+        cwd = Format.abbreviate(server.rootCwd ?? server.cwd ?? server.project)
         port = server.primaryPort
-        command = server.command.joined(separator: " ")
+        command = Shell.line(server.rootCommand.isEmpty ? server.command : server.rootCommand)
     }
 
     public func matches(_ server: Server) -> Bool {

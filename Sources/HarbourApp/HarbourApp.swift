@@ -42,6 +42,12 @@ final class HarbourModel {
     private(set) var snapshot: Snapshot?
     private(set) var config = Config.load()
     private(set) var killing: Set<String> = []
+    /// Pin id → when Start was pressed. Cleared when the server appears, or after
+    /// `startTimeout`, when the pin moves to `failed` and offers its tmux pane.
+    private(set) var starting: [String: Date] = [:]
+    private(set) var failed: Set<String> = []
+    /// Long enough for a cold `cargo run`.
+    private static let startTimeout: TimeInterval = 180
     private(set) var tmux: [String: String] = [:]
     var expanded: String?
     var filter = ""
@@ -67,13 +73,15 @@ final class HarbourModel {
         hotkey.register(setting == "off" ? nil : Hotkey(setting)) { StatusItem.toggle() }
     }
 
-    /// 2 s while the menu is open, 30 s otherwise; opening it refreshes immediately.
+    /// 2 s while the menu is open or a pin is starting, 30 s otherwise; opening it
+    /// refreshes immediately.
     private func restartLoop() {
         loop?.cancel()
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refresh()
-                let interval: Duration = (self?.isOpen ?? false) ? .seconds(2) : .seconds(30)
+                let fast = (self?.isOpen ?? false) || !(self?.starting.isEmpty ?? true)
+                let interval: Duration = fast ? .seconds(2) : .seconds(30)
                 try? await Task.sleep(for: interval)
             }
         }
@@ -89,6 +97,7 @@ final class HarbourModel {
         let fresh = await scanner.scan(config: config)
         snapshot = fresh
         history.record(fresh)
+        settleStarts(fresh)
         Preview.afterRefresh(self)
     }
 
@@ -111,6 +120,48 @@ final class HarbourModel {
         try? config.save()
     }
 
+    /// Runs the pin's command in tmux; the browser opens once the server answers HTTP.
+    func start(_ pin: Pin) {
+        guard starting[pin.id] == nil else { return }
+        failed.remove(pin.id)
+        starting[pin.id] = .now
+        restartLoop()
+        Task.detached {
+            let ok = Tmux.start(pin)
+            await MainActor.run {
+                guard !ok else { return }
+                self.starting[pin.id] = nil
+                self.failed.insert(pin.id)
+            }
+        }
+    }
+
+    /// The pin's tmux window, where a start that never came up left its output.
+    func showPane(_ pin: Pin) {
+        Task.detached {
+            if let target = Tmux.window(named: pin.name) { Tmux.jump(to: target) }
+        }
+    }
+
+    private func settleStarts(_ snapshot: Snapshot) {
+        failed.subtract(config.pins.filter { pin in snapshot.servers.contains(where: pin.matches) }.map(\.id))
+        for (id, since) in starting {
+            guard let pin = config.pins.first(where: { $0.id == id }) else {
+                starting[id] = nil
+                continue
+            }
+            if let server = snapshot.servers.first(where: pin.matches) {
+                // A port can bind a scan before it answers HTTP; give it a few more.
+                guard server.isHTTP || Date.now.timeIntervalSince(since) > 10 else { continue }
+                starting[id] = nil
+                open(server)
+            } else if Date.now.timeIntervalSince(since) > Self.startTimeout {
+                starting[id] = nil
+                failed.insert(id)
+            }
+        }
+    }
+
     func open(_ server: Server) {
         guard let url = server.url else { return }
         NSWorkspace.shared.open(url)
@@ -131,10 +182,19 @@ final class HarbourModel {
         return (groups, snapshot.system.filter { $0.matches(filter) })
     }
 
-    /// Return in the filter field opens the first match that serves HTTP.
+    var filteredPins: [Pin] {
+        stoppedPins.filter { filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter) }
+    }
+
+    /// Return in the filter field opens the first match that serves HTTP, else starts
+    /// the first stopped pin that matches.
     func openFirstMatch() {
         let (projects, system) = filtered
-        if let server = (projects.flatMap(\.servers) + system).first(where: \.isHTTP) { open(server) }
+        if let server = (projects.flatMap(\.servers) + system).first(where: \.isHTTP) {
+            open(server)
+        } else if let pin = filteredPins.first(where: \.folderExists) {
+            start(pin)
+        }
     }
 
     func openEditor(_ server: Server) {

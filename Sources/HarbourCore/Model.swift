@@ -38,6 +38,10 @@ public struct Server: Sendable, Codable, Identifiable {
     public let cwd: String?
     public let project: String
     public let command: [String]
+    /// The tree root's argv and folder: what started the whole tree (`./dev.sh`), which a
+    /// pin records, where `command` is only the process holding the first port.
+    public let rootCommand: [String]
+    public let rootCwd: String?
     public let start: Date
     public let tree: [ProcessNode]
     /// Pids above the root, nearest first, ending at launchd. Used for tmux lookup.
