@@ -43,7 +43,7 @@ A **server** is one listening process, together with all the ports it holds.
 A **project** is the git root of the server's working directory, or the working directory itself if there's no git root. Servers in the same project are grouped together. A typical example is a vite frontend plus a Rust backend.
 
 **Sections:**
-- **Projects** holds servers whose working directory is under a configured root (default `~/code`, `~/research`). This section is the default view.
+- **Projects** holds servers whose working directory is under a configured root (default `~/projects`). This section is the default view.
 - **System** holds everything else, such as AirPlay, rapportd, Discord, Postgres and the Figma agent. It's collapsed by default, and Harbour never offers to reap anything in it.
 
 ## Naming
@@ -118,10 +118,10 @@ All stored state lives in one file, `~/.config/harbour/config.json`, readable by
 
 ```json
 {
-  "roots": ["~/code", "~/research"],
-  "names": { "~/code/myapp:5193": "Myapp mockups" },
+  "roots": ["~/projects"],
+  "names": { "~/projects/myapp:5193": "Myapp mockups" },
   "editor": "nvim", "terminal": "Ghostty", "hotkey": "ctrl+option+p",
-  "pins":  [{ "project": "~/code/myapp", "cwd": "~/code/myapp/web", "port": 5173, "command": "node node_modules/vite/bin/vite.js --port 5173" }]
+  "pins":  [{ "project": "~/projects/myapp", "cwd": "~/projects/myapp/web", "port": 5173, "command": "node node_modules/vite/bin/vite.js --port 5173" }]
 }
 ```
 

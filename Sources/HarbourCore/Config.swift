@@ -3,7 +3,7 @@ import Foundation
 /// The only stored state: what the user created on purpose. Everything about what is
 /// running is derived from the OS on each scan, so there is no registry to go stale.
 public struct Config: Codable, Sendable, Equatable {
-    public var roots: [String] = ["~/code", "~/research"]
+    public var roots: [String] = ["~/projects"]
     /// "<project path>:<port>" → display name.
     public var names: [String: String] = [:]
     public var pins: [Pin] = []

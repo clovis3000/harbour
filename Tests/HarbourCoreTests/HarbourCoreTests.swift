@@ -23,7 +23,7 @@ import Testing
 
 @Test func configDefaultsSurvivePartialFiles() throws {
     let config = try JSONDecoder().decode(Config.self, from: Data(#"{"pins": []}"#.utf8))
-    #expect(config.roots == ["~/code", "~/research"])
+    #expect(config.roots == ["~/projects"])
 }
 
 @Test func uptimeFormatting() {

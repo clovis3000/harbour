@@ -44,7 +44,7 @@ Settings live in `~/.config/harbour/config.json`, and every key is optional:
 
 ```json
 {
-  "roots": ["~/code", "~/research"],
+  "roots": ["~/projects"],
   "hotkey": "ctrl+option+p",
   "editor": "nvim",
   "terminal": "Ghostty"
