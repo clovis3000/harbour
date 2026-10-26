@@ -43,6 +43,19 @@ struct MenuView: View {
                         ForEach(pins) { pin in
                             StoppedPinRow(model: model, pin: pin)
                         }
+                        let recent = model.recent
+                        if !recent.isEmpty {
+                            let open = model.showRecent || !model.filter.isEmpty
+                            SectionRow(title: "Recent", count: recent.count, open: open) {
+                                model.showRecent.toggle()
+                            }
+                            .padding(.top, 6)
+                            if open {
+                                ForEach(recent) { entry in
+                                    StoppedPinRow(model: model, pin: entry.pin, lastSeen: entry.lastSeen)
+                                }
+                            }
+                        }
                         if !system.isEmpty {
                             // While filtering, System matches show without a click.
                             let open = model.showSystem || !model.filter.isEmpty
@@ -461,15 +474,17 @@ private struct ServerDetail: View {
     }
 }
 
-/// A pin whose server isn't running. Clicking it starts the recorded command in tmux
-/// and opens the page once it answers, like launching an app from the Dock.
+/// A pin whose server isn't running, or a Recent entry (`lastSeen` set). Clicking it
+/// starts the recorded command in tmux and opens the page once it answers, like
+/// launching an app from the Dock.
 private struct StoppedPinRow: View {
     let model: HarbourModel
     let pin: Pin
+    var lastSeen: Date?
     @State private var hovering = false
 
     private var starting: Bool { model.starting[pin.id] != nil }
-    private var failed: Bool { model.failed.contains(pin.id) }
+    private var failed: Bool { model.failed[pin.id] != nil }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -489,10 +504,19 @@ private struct StoppedPinRow: View {
             }
             Spacer()
             Text(String(pin.port)).font(.callout.monospacedDigit())
-            Button { model.unpin(pin) } label: { Image(systemName: "pin.fill") }
-                .buttonStyle(.borderless)
-                .help("Unpin")
-                .frame(width: 18)
+            if lastSeen == nil {
+                Button { model.unpin(pin) } label: { Image(systemName: "pin.fill") }
+                    .buttonStyle(.borderless)
+                    .help("Unpin")
+                    .frame(width: 18)
+            } else {
+                Button { model.pin(pin) } label: { Image(systemName: "pin") }
+                    .buttonStyle(.borderless)
+                    .help("Pin")
+                    .frame(width: 18)
+                    .opacity(hovering ? 1 : 0)
+                    .allowsHitTesting(hovering)
+            }
             // Start sits in the slot a running row's kill button uses.
             if starting {
                 ProgressView().controlSize(.small).frame(width: 18)
@@ -512,11 +536,16 @@ private struct StoppedPinRow: View {
         .contentShape(Rectangle())
         .onTapGesture { if pin.folderExists { model.start(pin) } }
         .onHover { hovering = $0 }
+        .contextMenu {
+            if lastSeen != nil { Button("Forget") { model.forget(pin) } }
+        }
     }
 
     private var caption: String {
         if !pin.folderExists { return "folder missing · \(pin.cwd)" }
-        return starting ? "starting · \(pin.cwd)" : "stopped · \(pin.cwd)"
+        if starting { return "starting · \(pin.cwd)" }
+        guard let lastSeen else { return "stopped · \(pin.cwd)" }
+        return "\(Format.uptime(since: lastSeen)) ago · \(pin.cwd)"
     }
 }
 

@@ -8,7 +8,7 @@ purpose: The v1 contract for Harbour — what it shows, what it kills, what it s
 
 # Harbour — v1 spec
 
-Harbour is a macOS menu bar app and CLI that shows every local dev server you have running: which project it belongs to, its port, its memory and its uptime. You can open a server or kill it, together with the rest of that project's process tree. It derives everything from live OS state, so it has no catalogue to go stale. The only things it stores are your pins and name overrides.
+Harbour is a macOS menu bar app and CLI that shows every local dev server you have running: which project it belongs to, its port, its memory and its uptime. You can open a server or kill it, together with the rest of that project's process tree. It derives everything from live OS state, so it has no catalogue to go stale. The only things it stores are your pins and name overrides, and (since v4) a history of dated sightings.
 
 ---
 
@@ -29,7 +29,7 @@ The state of the author's laptop on 2026-10-20 was the motivating evidence. Ther
 
 ## Principles
 
-- **Derived, not stored.** Everything about what is running is read fresh from the OS on every refresh. The only stored data is what you created on purpose, namely pins and name overrides. Port assignment is a function of the project's path, not a registry entry. *Rationale:* a stored fact stays true only if the event that changes it also forces its update, and nothing forces a port registry to update when a process dies.
+- **Derived, not stored.** Everything about what is running is read fresh from the OS on every refresh. The only stored data is what you created on purpose, namely pins and name overrides, plus the Recent history, whose entries are dated sightings that age out rather than claims about now (see v4). Port assignment is a function of the project's path, not a registry entry. *Rationale:* a stored fact stays true only if the event that changes it also forces its update, and nothing forces a port registry to update when a process dies.
 - **Light on the system.** Process data is read through `libproc` and `sysctl`, never by shelling out to `lsof` or `ps`, which take hundreds of milliseconds per call. Refresh every 2 s while the menu is open and every 30 s otherwise.
 - **Kill errs toward too little.** If Harbour can't tell where a project's process tree begins, it kills less, never more.
 - **GUI and CLI share one core.** The menu is for the human and the CLI is for agents. Neither can do something the other's data can't support.
@@ -147,6 +147,21 @@ Pins act as a launch pad: once a server has run and been pinned, you can start i
 - **The command is stored as a shell line**, quoted from argv so it splits back into the same argv. Node tools rewrite their process title over argv, which the OS then reports as `["npm run dev", "", ""]`; a single spaced word followed by blanks is taken as an existing command line and kept unquoted. Because it's a plain line, the user can edit it in the config.
 - **Start types the command into a window of a detached tmux session called `harbour`**, one window per pin, named after the pin. A second Start reuses that window and respawns it first, so a hung earlier attempt can't swallow the keystrokes. *Rationale:* the window's login shell gives the server the PATH and nvm setup a terminal has, which an app launched from the menu bar doesn't. The server outlives Harbour quitting, its output stays in the pane, and the existing Jump to pane works on it unchanged. A process Harbour spawned directly would die with it and log nowhere.
 - **Clicking a stopped row, or the play button in the kill slot, starts it.** Return in the filter field starts the first matching stopped pin when nothing running matches. While a pin is starting, the menu refreshes every 2 s even when it's closed. When the pin's port appears and answers HTTP (or 10 s after it appears, if it never does), the page opens in the browser. After 180 s with no port, long enough for a cold `cargo run`, the row says "didn't start" and offers "show pane".
+
+## v4: Recent (2026-10-26)
+
+A Recent section lists project servers that ran lately, so you can restart one without pinning it first.
+
+- **What's stored:** for each Projects server the app sees, the same record a pin would make (name, project, folder, port, command) plus `lastSeen`. Keyed like a pin, by project and port, so a later run with a new command replaces the old entry. Kept in `~/.local/state/harbour/history.json`, apart from the config. *Rationale:* this is the one stored fact nobody wrote on purpose, and it is allowed because it can't go stale: "seen at 15:40" stays true after the fact and only ages out, whereas a registry of what's running stops being true when a process dies. The config stays for what the user wrote.
+- **What's shown:** entries seen in the last 3 days that aren't pinned or running, newest first, up to 8. Entries older than 3 days are deleted on the next scan. The section is open by default and collapses like System.
+- **Writes:** `lastSeen` moves only once it's a minute stale, so a 2 s refresh doesn't rewrite the file. Only the app records; the CLI reads (`harbour recent`).
+- **Rows** work like stopped pins: click or ▶ to start, hover to pin, right-click to forget.
+- **Starts don't depend on the config.** The app holds the pin it's starting, and tmux windows are found by an `@harbour-pin` window option holding the pin's id, not by name. *Rationale:* two projects can both call their server "web"; a name lookup would have respawned the other project's window.
+
+These changes to what a pin (or history entry) saves came from the first real entries (2026-10-26):
+
+- **Versioned interpreter paths are replaced with the name on PATH.** Homebrew's `python3` re-execs from `…/Cellar/python@3.14/3.14.2_1/…/Python.app/Contents/MacOS/Python`, which is what the process reports, and the next `brew upgrade` deletes that path. A Cellar path is saved as its binary's name, and that Python as `python3`.
+- **The launch folder is recovered when a script changes folder.** `python3 disegno/serve.py` changes into `disegno/` after it starts, so the process reports `disegno/` as its folder, and re-running from there would look for `disegno/disegno/serve.py`. If the command's relative path arguments don't exist from the reported folder, Harbour walks up until they do. `PWD` from the process environment was considered and dropped: a server started by a Claude session (through `disclaimer`) has no shell and no `PWD`.
 
 ## Not yet
 

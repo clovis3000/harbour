@@ -5,6 +5,7 @@ let usage = """
 usage: harbour ls [--all] [--json]   what's running (Projects, or everything)
        harbour kill <port|name>      kill a server's tree; a project name kills the project
        harbour port [label]          this project's derived port, e.g. `harbour port api`
+       harbour recent [--json]       project servers seen in the last 3 days, not pinned or running
 """
 
 var args = Array(CommandLine.arguments.dropFirst())
@@ -67,6 +68,23 @@ case "port":
     case .heldByProject(let port):
         print(port)
         FileHandle.standardError.write(Data("harbour: \(port) is already in use by this project\n".utf8))
+    }
+
+case "recent":
+    let entries = Recents.load().recent(excluding: .load(), running: await Scanner().scan())
+    if args.contains("--json") {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        print(String(decoding: try encoder.encode(entries), as: UTF8.self))
+    } else if entries.isEmpty {
+        print("nothing recent")
+    } else {
+        let width = min(36, entries.map(\.pin.name.count).max() ?? 0)
+        for e in entries {
+            print([pad(e.pin.name, width), pad(String(e.pin.port), 6), pad(Format.uptime(since: e.lastSeen) + " ago", 10),
+                   pad(e.pin.cwd, 28), e.pin.command].joined(separator: "  "))
+        }
     }
 
 case "-h", "--help", "help":

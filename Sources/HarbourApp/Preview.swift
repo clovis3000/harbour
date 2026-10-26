@@ -6,8 +6,8 @@ import SwiftUI
 /// to a PNG after the first scan (no Screen Recording permission needed) and exits;
 /// HARBOUR_SNAPSHOT_DELAY=<s> waits longer (memory history needs 10 s between samples);
 /// HARBOUR_FILTER=<text> types into the filter;
-/// HARBOUR_EXPAND=<port> opens that server's detail; HARBOUR_START=<pin name> presses
-/// that pin's Start after the first scan; HARBOUR_OPEN=1 clicks the real
+/// HARBOUR_EXPAND=<port> opens that server's detail; HARBOUR_START=<name> presses
+/// that pin's (or Recent entry's) Start after the first scan; HARBOUR_OPEN=1 clicks the real
 /// menu bar item, toggles System, and logs the menu window's frame to stderr.
 @MainActor
 enum Preview {
@@ -33,7 +33,7 @@ enum Preview {
 
     static func afterRefresh(_ model: HarbourModel) {
         if !started, let name = environment["HARBOUR_START"],
-           let pin = model.stoppedPins.first(where: { $0.name == name }) {
+           let pin = (model.stoppedPins + model.recent.map(\.pin)).first(where: { $0.name == name }) {
             started = true
             model.start(pin)
         }

@@ -42,10 +42,13 @@ final class HarbourModel {
     private(set) var snapshot: Snapshot?
     private(set) var config = Config.load()
     private(set) var killing: Set<String> = []
-    /// Pin id → when Start was pressed. Cleared when the server appears, or after
-    /// `startTimeout`, when the pin moves to `failed` and offers its tmux pane.
-    private(set) var starting: [String: Date] = [:]
-    private(set) var failed: Set<String> = []
+    /// Pin id → the pin and when Start was pressed. The pin is held here, not looked up
+    /// in the config, because a Recent entry isn't a pin. Cleared when the server
+    /// appears, or after `startTimeout`, when the pin moves to `failed` and offers its pane.
+    private(set) var starting: [String: (pin: Pin, since: Date)] = [:]
+    private(set) var recents = Recents.load()
+    var showRecent = true
+    private(set) var failed: [String: Pin] = [:]
     /// Long enough for a cold `cargo run`.
     private static let startTimeout: TimeInterval = 180
     private(set) var tmux: [String: String] = [:]
@@ -97,6 +100,7 @@ final class HarbourModel {
         let fresh = await scanner.scan(config: config)
         snapshot = fresh
         history.record(fresh)
+        if recents.record(fresh) { try? recents.save() }
         settleStarts(fresh)
         Preview.afterRefresh(self)
     }
@@ -123,15 +127,15 @@ final class HarbourModel {
     /// Runs the pin's command in tmux; the browser opens once the server answers HTTP.
     func start(_ pin: Pin) {
         guard starting[pin.id] == nil else { return }
-        failed.remove(pin.id)
-        starting[pin.id] = .now
+        failed[pin.id] = nil
+        starting[pin.id] = (pin, .now)
         restartLoop()
         Task.detached {
             let ok = Tmux.start(pin)
             await MainActor.run {
                 guard !ok else { return }
                 self.starting[pin.id] = nil
-                self.failed.insert(pin.id)
+                self.failed[pin.id] = pin
             }
         }
     }
@@ -139,17 +143,13 @@ final class HarbourModel {
     /// The pin's tmux window, where a start that never came up left its output.
     func showPane(_ pin: Pin) {
         Task.detached {
-            if let target = Tmux.window(named: pin.name) { Tmux.jump(to: target) }
+            if let target = Tmux.window(for: pin) { Tmux.jump(to: target) }
         }
     }
 
     private func settleStarts(_ snapshot: Snapshot) {
-        failed.subtract(config.pins.filter { pin in snapshot.servers.contains(where: pin.matches) }.map(\.id))
-        for (id, since) in starting {
-            guard let pin = config.pins.first(where: { $0.id == id }) else {
-                starting[id] = nil
-                continue
-            }
+        failed = failed.filter { _, pin in !snapshot.servers.contains(where: pin.matches) }
+        for (id, (pin, since)) in starting {
             if let server = snapshot.servers.first(where: pin.matches) {
                 // A port can bind a scan before it answers HTTP; give it a few more.
                 guard server.isHTTP || Date.now.timeIntervalSince(since) > 10 else { continue }
@@ -157,7 +157,7 @@ final class HarbourModel {
                 open(server)
             } else if Date.now.timeIntervalSince(since) > Self.startTimeout {
                 starting[id] = nil
-                failed.insert(id)
+                failed[id] = pin
             }
         }
     }
@@ -186,13 +186,31 @@ final class HarbourModel {
         stoppedPins.filter { filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter) }
     }
 
+    var recent: [Recents.Entry] {
+        guard let snapshot else { return [] }
+        return recents.recent(excluding: config, running: snapshot)
+            .filter { filter.isEmpty || $0.pin.name.localizedCaseInsensitiveContains(filter)
+                || $0.pin.cwd.localizedCaseInsensitiveContains(filter) }
+    }
+
+    func pin(_ pin: Pin) {
+        guard !config.pins.contains(where: { $0.id == pin.id }) else { return }
+        config.pins.append(pin)
+        try? config.save()
+    }
+
+    func forget(_ pin: Pin) {
+        recents.forget(pin.id)
+        try? recents.save()
+    }
+
     /// Return in the filter field opens the first match that serves HTTP, else starts
     /// the first stopped pin that matches.
     func openFirstMatch() {
         let (projects, system) = filtered
         if let server = (projects.flatMap(\.servers) + system).first(where: \.isHTTP) {
             open(server)
-        } else if let pin = filteredPins.first(where: \.folderExists) {
+        } else if let pin = (filteredPins + recent.map(\.pin)).first(where: \.folderExists) {
             start(pin)
         }
     }

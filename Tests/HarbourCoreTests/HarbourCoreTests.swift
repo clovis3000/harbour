@@ -72,6 +72,21 @@ import Testing
     #expect(Shell.line(["npm run dev   ", "", ""]) == "npm run dev")   // node rewrote its title over argv
 }
 
+@Test func savedCommandsSurviveBrewUpgradesAndChdir() throws {
+    let python = "/opt/homebrew/Cellar/python@3.14/3.14.2_1/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+    #expect(Shell.portable([python, "-m", "http.server"]) == ["python3", "-m", "http.server"])
+    #expect(Shell.portable(["/opt/homebrew/Cellar/node/24.1.0/bin/node", "x.js"]) == ["node", "x.js"])
+    #expect(Shell.portable(["/bin/bash", "./dev.sh"]) == ["/bin/bash", "./dev.sh"])
+
+    // serve.py chdirs into disegno/ after starting; the launch folder is its parent.
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+    try FileManager.default.createDirectory(atPath: root + "/disegno", withIntermediateDirectories: true)
+    FileManager.default.createFile(atPath: root + "/disegno/serve.py", contents: Data())
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    #expect(Pin.launchFolder(["python3", "disegno/serve.py", "29179"], from: root + "/disegno") == root)
+    #expect(Pin.launchFolder(["python3", "-m", "http.server"], from: root + "/disegno") == root + "/disegno")
+}
+
 @Test func pinRecordsTheTreeRoot() {
     let base = Server.fixture(id: "1@1", footprint: 0, port: 5174, cwd: "/tmp/animise/web")
     let server = Server(id: base.id, host: "local", name: "Animise", root: 445, listeners: [772, 803],
@@ -84,11 +99,35 @@ import Testing
     #expect(pin.cwd == "/tmp/animise")
 }
 
+@Test func recentsAgeOutAndSkipPinnedAndRunning() {
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+    let a = Server.fixture(id: "1@1", footprint: 0, name: "A", port: 3000, cwd: "/tmp/a/web")
+    let b = Server.fixture(id: "2@1", footprint: 0, name: "B", port: 4000, cwd: "/tmp/b/web")
+    var recents = Recents()
+    let first = recents.record(Snapshot(servers: [a], taken: t0), at: t0)
+    let soon = recents.record(Snapshot(servers: [a], taken: t0), at: t0.addingTimeInterval(30))
+    let other = recents.record(Snapshot(servers: [b], taken: t0), at: t0.addingTimeInterval(3600))
+    #expect(first && !soon && other)   // under a minute since the last sighting: nothing to write
+
+    let empty = Snapshot(servers: [], taken: t0)
+    let later = t0.addingTimeInterval(7200)
+    #expect(recents.recent(excluding: Config(), running: empty, now: later).map(\.pin.name) == ["B", "A"])
+    #expect(recents.recent(excluding: Config(), running: Snapshot(servers: [a], taken: t0), now: later).map(\.pin.name) == ["B"])
+    var config = Config()
+    config.togglePin(b)
+    #expect(recents.recent(excluding: config, running: empty, now: later).map(\.pin.name) == ["A"])
+
+    // A's last sighting falls out of the window; B's doesn't yet.
+    let pruned = recents.record(empty, at: t0.addingTimeInterval(Recents.window + 60))
+    #expect(pruned)
+    #expect(recents.entries.map(\.pin.name) == ["B"])
+}
+
 extension Server {
     static func fixture(id: String, footprint: UInt64, name: String = "x", port: Int = 3000, cwd: String = "/tmp/x") -> Server {
         Server(id: id, host: "local", name: name, root: 1, listeners: [1],
                sockets: [Socket(port: port, family: .v4, address: "127.0.0.1")], cwd: cwd,
-               project: (cwd as NSString).deletingLastPathComponent, command: [], rootCommand: [], rootCwd: cwd,
+               project: (cwd as NSString).deletingLastPathComponent, command: [], rootCommand: ["./dev.sh"], rootCwd: cwd,
                start: .now, tree: [],
                ancestors: [], footprint: footprint, badges: [], section: .projects,
                primaryPort: port, httpPorts: [port])

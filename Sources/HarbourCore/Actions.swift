@@ -118,6 +118,22 @@ public enum Shell {
         return args.map(quote).joined(separator: " ")
     }
 
+    /// Homebrew re-execs some interpreters from a versioned Cellar path (python3 reports
+    /// `…/Cellar/python@3.14/3.14.2_1/…/Python.app/Contents/MacOS/Python`), which the next
+    /// `brew upgrade` deletes. A saved command uses the name on PATH instead.
+    public static func portable(_ argv: [String]) -> [String] {
+        guard let first = argv.first else { return argv }
+        let name: String
+        if first.hasSuffix("/Python.app/Contents/MacOS/Python") {
+            name = "python3"
+        } else if first.hasPrefix("/opt/homebrew/Cellar/") || first.hasPrefix("/usr/local/Cellar/") {
+            name = (first as NSString).lastPathComponent
+        } else {
+            return argv
+        }
+        return [name] + argv.dropFirst()
+    }
+
     public static func quote(_ arg: String) -> String {
         let safe = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "@%+=:,./_-"))
         if !arg.isEmpty, arg.unicodeScalars.allSatisfy(safe.contains) { return arg }
@@ -132,11 +148,12 @@ public enum Tmux {
     /// window's login shell gives it the PATH and nvm a terminal would (an app launched
     /// from the menu bar has neither), and it outlives the server, so a crash leaves its
     /// output in the pane for Jump to pane. Reuses the pin's window, respawned so a hung
-    /// earlier attempt can't swallow the keys.
+    /// earlier attempt can't swallow the keys. Windows are found by a tag holding the pin's
+    /// id, not by name: two projects can both call their server "web".
     public static func start(_ pin: Pin) -> Bool {
         let cwd = Format.expand(pin.cwd)
         let target: String
-        if let existing = window(named: pin.name) {
+        if let existing = window(for: pin) {
             guard run(["respawn-window", "-k", "-t", existing, "-c", cwd]) != nil else { return false }
             target = existing
         } else {
@@ -145,18 +162,21 @@ public enum Tmux {
                 : ["new-session", "-d", "-s", session]
             guard let id = run(create + ["-P", "-F", "#{window_id}", "-n", pin.name, "-c", cwd]) else { return false }
             target = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard run(["set-option", "-w", "-t", target, tag, pin.id]) != nil else { return false }
         }
         // -l so no word of the command is read as a key name.
         return run(["send-keys", "-l", "-t", target, pin.command]) != nil
             && run(["send-keys", "-t", target, "Enter"]) != nil
     }
 
+    private static let tag = "@harbour-pin"
+
     /// `harbour:@7` for the pin's window, for Jump to pane when a start didn't come up.
-    public static func window(named name: String) -> String? {
-        guard let output = run(["list-windows", "-t", "=" + session, "-F", "#{window_id} #{window_name}"]) else { return nil }
+    public static func window(for pin: Pin) -> String? {
+        guard let output = run(["list-windows", "-t", "=" + session, "-F", "#{window_id} #{\(tag)}"]) else { return nil }
         return output.split(separator: "\n").lazy.compactMap { line -> String? in
             let parts = line.split(separator: " ", maxSplits: 1)
-            return parts.count == 2 && parts[1] == name ? "\(session):\(parts[0])" : nil
+            return parts.count == 2 && parts[1] == pin.id ? "\(session):\(parts[0])" : nil
         }.first
     }
 

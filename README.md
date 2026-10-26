@@ -14,11 +14,12 @@ Local web apps have become desktop apps without any of the infrastructure deskto
   - 📶 **exposed:** bound to all interfaces, so reachable from your network. (`python -m http.server` does this unless you pass `--bind 127.0.0.1`.)
 - **Detail:** the command line, folder, bind addresses, the process tree with a kill button per process, and the tmux pane the server is running in, with a "jump to pane" button.
 - **Pins** keep a server's row in the list, greyed out, after it stops. Click a stopped pin to start it again: Harbour types the command that started the whole process tree (`./dev.sh`, `npm run dev`) into its own window of a detached tmux session called `harbour`, then opens the page once it answers. The window's shell outlives the server, so if a start fails, its output is still in the pane, which "show pane" opens. The command is saved in the config as a plain shell line, so you can change it (to `just dev`, say).
-- **Hotkey and filter:** <kbd>⌃⌥P</kbd> opens the menu from anywhere, with the cursor in a filter field. Type a name, folder or port, then press Return to open the first match, or to start the first matching stopped pin if nothing running matches. Esc clears the field.
+- **Recent:** project servers that ran in the last 3 days and aren't pinned or running, newest first (up to 8). Click one to start it the same way as a pin; hover to pin it, or right-click to forget it. History is kept in `~/.local/state/harbour/history.json`.
+- **Hotkey and filter:** <kbd>⌃⌥P</kbd> opens the menu from anywhere, with the cursor in a filter field. Type a name, folder or port, then press Return to open the first match, or to start the first matching stopped pin or Recent entry if nothing running matches. Esc clears the field.
 - **Memory history:** a sparkline in the detail view of the process tree's footprint over the last two hours, for spotting a dev server that leaks.
 - **Open the folder** in your editor (`nvim` runs in your terminal; Zed, Cursor or VS Code open as apps) or in a new terminal window.
 
-Everything is read live through `libproc`. Harbour never shells out to `lsof` and keeps no registry that could go stale. The only stored state is your pins and name overrides, in `~/.config/harbour/config.json`.
+Everything is read live through `libproc`. Harbour never shells out to `lsof` and keeps no registry that could go stale. What you set on purpose (pins, name overrides) is in `~/.config/harbour/config.json`; the only other stored state is the Recent history, a list of dated sightings.
 
 ## CLI
 
@@ -26,6 +27,7 @@ Everything is read live through `libproc`. Harbour never shells out to `lsof` an
 harbour ls [--all] [--json]   # what's running (projects, or everything)
 harbour kill <port|name>      # kill a server's process tree; a project name kills the whole project
 harbour port [label]          # this project's stable port, e.g. `harbour port api`
+harbour recent [--json]       # project servers seen in the last 3 days, with the command that restarts them
 ```
 
 `harbour port` hashes the git root (plus an optional label) into 20000–29999 and skips to the next port if that one is taken. The same project always gets the same port, and nothing is written anywhere. It's meant for coding agents: one line in your agent instructions ("take dev-server ports from `harbour port`") stops them from all reaching for 5173.
